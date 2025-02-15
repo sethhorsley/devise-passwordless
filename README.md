@@ -11,6 +11,12 @@ A passwordless login strategy for [Devise] using emailed magic links
 * [Supports multiple user (resource) types](#multiple-user-resource-types)
 * All the goodness of Devise!
 
+## Call for maintainers 🗣️📣
+
+We're currently looking for volunteers to help maintain this library! [See here for details][call-for-maintainers].
+
+[call-for-maintainers]: https://github.com/abevoelker/devise-passwordless/discussions/64
+
 ## 0.x to 1.0 Upgrade
 
 ⭐ The 1.0 release includes significant breaking changes! ⭐
@@ -332,6 +338,52 @@ end
 config.passwordless_tokenizer = "::LuckyUserTokenizer"
 ```
 
+#### Single-use tokenizer
+
+With Rails 7.1 and [generates_token_for](https://api.rubyonrails.org/classes/ActiveRecord/TokenFor/ClassMethods.html#method-i-generates_token_for) you can create a single-use tokenizer. For example:
+
+```ruby
+class SingleUseTokenizer
+  def self.decode(token, resource_class, *args)
+    resource = resource_class.find_by_token_for(:passwordless_login, token)
+    raise Devise::Passwordless::ExpiredTokenError unless resource
+    raise Devise::Passwordless::InvalidTokenError unless resource.is_a?(resource_class)
+    [resource, {}]
+  end
+
+  def self.encode(resource, *args)
+    resource.generate_token_for(:passwordless_login)
+  end
+end
+```
+
+Then in your `User` model:
+
+```ruby
+  generates_token_for :passwordless_login, expires_in: passwordless_login_within do
+    current_sign_in_at
+  end
+```
+
+It relies on the `current_sign_in_at` attribute changing on a user after a successful login.
+Once it changes, the same token will always be invalid and cannot be reused.
+
+Since the same link cannot be visited twice, you may need to ignore `HEAD` requests
+to avoid some email clients (ex: Outlook) visiting links with a `HEAD` request before
+the `GET` request with something like:
+
+```ruby
+module Users
+  class PasswordlessMagicLinksController < Devise::MagicLinksController
+    def show
+      return render(plain: '') if request.method == 'HEAD'
+
+      super
+    end
+  end
+end
+```
+
 ## Multiple user (resource) types
 
 Devise supports multiple resource types, so we do too.
@@ -590,9 +642,38 @@ Other Ruby libraries that offer passwordless authentication:
 * [passwordless](https://github.com/mikker/passwordless)
 * [magic-link](https://github.com/dvanderbeek/magic-link)
 
+## Gem development
+
+### Running tests
+
+To run the set of basic gem tests, do:
+
+```
+$ bundle
+$ bundle exec rake
+```
+
+The more important and more thorough tests utilize a "dummy" Rails application.
+
+To run this full suite of dummy app tests across all supported versions of Ruby and Rails,
+you can use [nektos/act][] to run the same tests that run in our GitHub Workflow CI:
+
+```
+$ act -W .github/workflows/test.yml -P ubuntu-latest=ghcr.io/catthehacker/ubuntu:act-latest --no-cache-server
+```
+
+To run only against specific versions of Ruby or Rails, you can use the `--matrix` flag of `act`:
+
+```
+$ act -W .github/workflows/test.yml -P ubuntu-latest=ghcr.io/catthehacker/ubuntu:act-latest --no-cache-server --matrix ruby-version:3.2 --matrix rails-version:7 --matrix rails-version:6.1
+```
+
+The above example will only run the tests for Rails 7 and Rails 6.1 using Ruby 3.2.
+
 ## License
 
 The gem is available as open source under the terms of the [MIT License](https://opensource.org/licenses/MIT).
 
 [Devise]: https://github.com/heartcombo/devise
 [devise-i18n]: https://github.com/heartcombo/devise#i18n
+[nektos/act]: https://github.com/nektos/act
